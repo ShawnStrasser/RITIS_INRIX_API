@@ -25,7 +25,8 @@ class RITIS_Downloader:
                 confidence_score=[30, 20, 10],
                 verbose=1,
                 verify=True,
-                sleep_time=60):  
+                sleep_time=60,
+                daily_download_timeout_minutes=60):  
         
         self.api_key = api_key
         self.version = version
@@ -43,6 +44,7 @@ class RITIS_Downloader:
         self.last_run = last_run_path
         self.verify = verify
         self.sleep_time = sleep_time
+        self.daily_download_timeout_minutes = daily_download_timeout_minutes
 
         # supress warnings if verify is False
         if not self.verify:
@@ -112,7 +114,7 @@ class RITIS_Downloader:
             return job_id, job_uuid
         else:
             self._print(f"Job submission failed: {response.text}", 1)
-            return None, None
+            raise Exception(f"Job submission failed: {response.text}")
 
     def _check_job_status(self, job_id):
         response = requests.get(f"{self.status_url}?key={self.api_key}&jobId={job_id}", verify=self.verify)
@@ -165,28 +167,40 @@ class RITIS_Downloader:
 
     def daily_download(self):
         self._print("Starting daily download", 1)
-        date_list = self._get_dates()
-        if not date_list:
-            self._print("Data is already updated through yesterday.", 1)
-            return
+        try:
+            date_list = self._get_dates()
+            if not date_list:
+                self._print("Data is already updated through yesterday, or something went wrong.", 1)
+                return
 
-        for date in date_list:
-            job_name = f"daily_{date}"
-            job_id, job_uuid = self._submit_job(date, date, job_name)
-            if job_id:
-                while True:
-                    status = self._check_job_status(job_id)
-                    if status['state'] == 'SUCCEEDED':
-                        self._download_and_process_job_results(job_uuid, job_name)
-                        break
-                    elif status['state'] in ['KILLED', 'FAILED']:
-                        self._print(f"Job {job_id} failed with state: {status['state']}", 1)
-                        break
-                    time.sleep(self.sleep_time)
+            for date in date_list:
+                job_name = f"daily_{date}"
+                # Use the same date for both start and end, but add one day to the end date
+                start_date = date
+                end_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+                job_id, job_uuid = self._submit_job(start_date, end_date, job_name)
+                if job_id:
+                    start_time = datetime.now()
+                    max_time = timedelta(minutes=self.daily_download_timeout_minutes)
+                    
+                    while datetime.now() - start_time < max_time:
+                        status = self._check_job_status(job_id)
+                        if status['state'] == 'SUCCEEDED':
+                            if self._download_and_process_job_results(job_uuid, job_name):
+                                # Update last run date after each successful download
+                                with open(self.last_run, 'w') as f:
+                                    f.write(f"{date} 00:00:00")
+                            break
+                        elif status['state'] in ['KILLED', 'FAILED']:
+                            raise Exception(f"Job {job_id} failed with state: {status['state']}")
+                        time.sleep(self.sleep_time)
+                    else:
+                        raise Exception(f"Job {job_id} timed out after {self.daily_download_timeout_minutes} minutes")
 
-        with open(self.last_run, 'w') as f:
-            f.write(datetime.now().strftime('%Y-%m-%d 00:00:00'))
-        self._print("Daily download completed", 1)
+            self._print("Daily download completed", 1)
+        except Exception as e:
+            self._print(f"An error occurred during daily download: {str(e)}", 1)
+            raise e
 
     def single_download(self, start_date, end_date, job_name):
         self._print(f"Starting single download: start_date={start_date}, end_date={end_date}, job_name={job_name}", 1)
