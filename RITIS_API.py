@@ -174,7 +174,7 @@ class RITIS_Downloader:
                 return
 
             for date in date_list:
-                job_name = f"daily_{date}"
+                job_name = str(date)
                 # Use the same date for both start and end, but add one day to the end date
                 start_date = date
                 end_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")

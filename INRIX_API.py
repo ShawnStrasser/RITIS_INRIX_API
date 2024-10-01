@@ -33,11 +33,10 @@ class INRIX_Downloader:
         self._print(f"Reading segments from: {segments_path}", 2)
         try:
             with open(segments_path, 'r') as file:
-                segments = [line.strip() for line in file]
-            # Join the segment IDs into a comma-separated string
-            ids_param = ', '.join(segments)
-            self._print(f"Loaded {len(ids_param)} segments", 1)
-            return ids_param
+                content = file.read().strip()
+                segments = content.split(',')
+            self._print(f"Loaded {len(segments)} segments", 1)
+            return segments
         except Exception as e:
             self._print(f"Error reading segments file {segments_path}: {e}", 1)
             raise
@@ -98,16 +97,18 @@ class INRIX_Downloader:
         all_data = []
 
         try:
-            for i in range(0, len(self.segments.split(',')), 1000):
-                segment_batch = self.segments.split(',')[i:i+1000]
+            for i in range(0, len(self.segments), 500):  # Changed from 1000 to 500
+                segment_batch = self.segments[i:i+500]  # Changed from 1000 to 500
+
+                self._print(f"Requesting data for segments {i+1} to {i+len(segment_batch)}", 2)
+
                 params = {
-                    'ids': ','.join(segment_batch),
+                    'ids': ','.join(segment.strip() for segment in segment_batch),
                     'accesstoken': self.token
-                }
-                
-                self._print(f"Requesting data for segments {i} to {i+len(segment_batch)}", 2)
+                    }
+
                 response = requests.get(base_url, params=params)
-                
+                         
                 response.raise_for_status()  # Raises an HTTPError for bad responses
 
                 data = response.json()['result']['segmentspeeds'][0]['segments']
