@@ -26,7 +26,8 @@ class RITIS_Downloader:
                 verbose=1,
                 verify=True,
                 sleep_time=60,
-                daily_download_timeout_minutes=60):  
+                daily_download_timeout_minutes=300
+                ):
         
         self.api_key = api_key
         self.version = version
@@ -72,7 +73,7 @@ class RITIS_Downloader:
             print(message)
 
 
-    def _submit_job(self, start_date, end_date, name):
+    def _submit_job(self, start_date, end_date, name, attempts=3):
         self._print(f"Submitting job: start_date={start_date}, end_date={end_date}, name={name}", 2)
         job_uuid = str(uuid.uuid4())
         data = {
@@ -106,7 +107,16 @@ class RITIS_Downloader:
         }
         
         self._print(f"Submitting job with UUID: {job_uuid}", 2)
-        response = requests.post(f"{self.submit_url}?key={self.api_key}", json=data, verify=self.verify)
+        # Try to submit the job up to n times
+        for i in range(attempts):
+            sleep_time = 10 * (i**2)
+            time.sleep(sleep_time)
+            response = requests.post(f"{self.submit_url}?key={self.api_key}", json=data, verify=self.verify)
+            if response.status_code == 200 or i == attempts-1:
+                break
+            else:
+                self._print(f"Job submission attempt {i+1}/{attempts} failed, trying again in {sleep_time} seconds", 1)
+
         self._print(f"Job submission response: {response.status_code}", 2)
         if response.status_code == 200:
             job_id = response.json()['id']
@@ -121,10 +131,13 @@ class RITIS_Downloader:
         if response.status_code == 200:
             status = response.json()
             self._print(f"Job Progress: {status['progress']}%", 2)
-            return status
+            return status['state']
+        elif response.status_code == 429:
+            self._print(f"Rate limit exceeded with message:\n {response.text}", 1)
+            return 'RATE_LIMITED'
         else:
             self._print(f"Failed to get job status: {response.text}", 1)
-            return None
+            raise Exception(f"Failed to get job status: {response.text}")
 
     def _download_and_process_job_results(self, uuid, job_name):
         self._print(f"Downloading and processing results for UUID: {uuid}", 2)
@@ -151,56 +164,69 @@ class RITIS_Downloader:
 
     def _get_dates(self):
         self._print("Getting dates for daily download", 2)
-        today = datetime.now().date()
-        yesterday = today - timedelta(days=1)
-        date_list = []
-        
-        with open(self.last_run, 'r') as f:
-            last_run = datetime.strptime(f.read(), '%Y-%m-%d %H:%M:%S').date()
-        
-        while last_run <= yesterday:
-            date_list.append(last_run.strftime("%Y-%m-%d"))
-            last_run += timedelta(days=1)
-        
-        self._print(f"Dates to process: {date_list}", 2)
-        return date_list
+        try:
+            today = datetime.now().date()
+            yesterday = today - timedelta(days=1)
+            date_list = []
+            
+            with open(self.last_run, 'r') as f:
+                last_run = datetime.strptime(f.read(), '%Y-%m-%d %H:%M:%S').date()
+            
+            while last_run <= yesterday:
+                date_list.append(last_run.strftime("%Y-%m-%d"))
+                last_run += timedelta(days=1)
+            
+            self._print(f"Dates to process: {date_list}", 2)
+            return date_list
+        except Exception as e:
+            raise Exception(f"Failed to get dates: {e}")
 
     def daily_download(self):
         self._print("Starting daily download", 1)
-        try:
-            date_list = self._get_dates()
-            if not date_list:
-                self._print("Data is already updated through yesterday, or something went wrong.", 1)
-                return
+        date_list = self._get_dates()
+        if not date_list:
+            self._print("Data is already updated through yesterday, or something went wrong.", 1)
+            return
 
-            for date in date_list:
-                job_name = str(date)
-                # Use the same date for both start and end, but add one day to the end date
-                start_date = date
-                end_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-                job_id, job_uuid = self._submit_job(start_date, end_date, job_name)
-                if job_id:
-                    start_time = datetime.now()
-                    max_time = timedelta(minutes=self.daily_download_timeout_minutes)
-                    
-                    while datetime.now() - start_time < max_time:
-                        status = self._check_job_status(job_id)
-                        if status['state'] == 'SUCCEEDED':
-                            if self._download_and_process_job_results(job_uuid, job_name):
-                                # Update last run date after each successful download
-                                with open(self.last_run, 'w') as f:
-                                    f.write(f"{date} 00:00:00")
-                            break
-                        elif status['state'] in ['KILLED', 'FAILED']:
+        # Iterate through each date
+        for date in date_list:
+            job_name = str(date)
+            # Use the same date for both start and end, but add one day to the end date
+            start_date = date
+            end_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            # Failed jobs will be retried once using this counter
+            failed_attempts = 0
+
+            job_id, job_uuid = self._submit_job(start_date, end_date, job_name)
+
+            if job_id:
+                start_time = datetime.now()
+                max_time = timedelta(minutes=self.daily_download_timeout_minutes)
+                
+                while datetime.now() - start_time < max_time:
+                    status = self._check_job_status(job_id)
+                    if status == 'SUCCEEDED':
+                        if self._download_and_process_job_results(job_uuid, job_name):
+                            # Update last run date after each successful download
+                            with open(self.last_run, 'w') as f:
+                                f.write(f"{date} 00:00:00")
+                        break
+                    elif status in ['KILLED', 'FAILED']:
+                        failed_attempts += 1
+                        if failed_attempts <= 1:
+                            self._print(f"Job {job_id} failed with state: {status}, retrying now", 1)
+                            job_id, job_uuid = self._submit_job(start_date, end_date, job_name)
+                        else:
                             raise Exception(f"Job {job_id} failed with state: {status['state']}")
-                        time.sleep(self.sleep_time)
-                    else:
-                        raise Exception(f"Job {job_id} timed out after {self.daily_download_timeout_minutes} minutes")
+                    elif status == 'RATE_LIMITED':
+                        self._print(f"Rate limit exceeded, mandatory nap time for 5 minutes...", 1)
+                        time.sleep(300)
+                    time.sleep(self.sleep_time)
+                else:
+                    raise Exception(f"Job {job_id} timed out after {self.daily_download_timeout_minutes} minutes")
 
-            self._print("Daily download completed", 1)
-        except Exception as e:
-            self._print(f"An error occurred during daily download: {str(e)}", 1)
-            raise e
+        self._print("Daily download completed", 1)
+
 
     def single_download(self, start_date, end_date, job_name):
         self._print(f"Starting single download: start_date={start_date}, end_date={end_date}, job_name={job_name}", 1)
