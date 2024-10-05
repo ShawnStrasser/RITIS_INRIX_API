@@ -170,7 +170,17 @@ class RITIS_Downloader:
             date_list = []
             
             with open(self.last_run, 'r') as f:
-                last_run = datetime.strptime(f.read(), '%Y-%m-%d %H:%M:%S').date()
+                last_run_str = f.read().strip()  # Remove any leading/trailing whitespace
+            
+            # Try parsing with different formats
+            for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                try:
+                    last_run = datetime.strptime(last_run_str, fmt).date()
+                    break
+                except ValueError:
+                    continue
+            else:
+                raise ValueError(f"Unable to parse date: {last_run_str}")
             
             while last_run <= yesterday:
                 date_list.append(last_run.strftime("%Y-%m-%d"))
