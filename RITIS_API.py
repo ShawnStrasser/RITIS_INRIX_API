@@ -182,9 +182,9 @@ class RITIS_Downloader:
             else:
                 raise ValueError(f"Unable to parse date: {last_run_str}")
             
-            while last_run <= yesterday:
-                date_list.append(last_run.strftime("%Y-%m-%d"))
+            while last_run < yesterday:
                 last_run += timedelta(days=1)
+                date_list.append(last_run.strftime("%Y-%m-%d"))
             
             self._print(f"Dates to process: {date_list}", 2)
             return date_list
