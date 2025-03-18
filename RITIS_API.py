@@ -107,14 +107,19 @@ class RITIS_Downloader:
         }
         
         self._print(f"Submitting job with UUID: {job_uuid}", 2)
+        # Print the request enpoint and headers for debugging
+        self._print(f"Request Endpoint:\n{self.submit_url}?key={self.api_key}", 2)
+        self._print(f"Request Data:\n{data}", 2)
+
         # Try to submit the job up to n times
+        sleep_time = 0
         for i in range(attempts):
-            sleep_time = 10 * (i**2)
             time.sleep(sleep_time)
             response = requests.post(f"{self.submit_url}?key={self.api_key}", json=data, verify=self.verify)
             if response.status_code == 200 or i == attempts-1:
                 break
             else:
+                sleep_time = 10 * ((i+1)**2)
                 self._print(f"Job submission attempt {i+1}/{attempts} failed, trying again in {sleep_time} seconds", 1)
 
         self._print(f"Job submission response: {response.status_code}", 2)
@@ -245,11 +250,11 @@ class RITIS_Downloader:
         if job_id:
             while True:
                 status = self._check_job_status(job_id)
-                if status['state'] == 'SUCCEEDED':
+                if status == 'SUCCEEDED':
                     self._download_and_process_job_results(job_uuid, job_name)
                     break
-                elif status['state'] in ['KILLED', 'FAILED']:
-                    self._print(f"Job {job_id} failed with state: {status['state']}", 1)
+                elif status in ['KILLED', 'FAILED']:
+                    self._print(f"Job {job_id} failed with state: {status}", 1)
                     break
                 time.sleep(self.sleep_time)
         self._print("Single download completed", 1)
