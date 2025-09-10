@@ -16,6 +16,7 @@ classifiers = [
 dependencies = [
   "requests",
   "duckdb",
+  "pandas",
 ]
 
 [project.optional-dependencies]
