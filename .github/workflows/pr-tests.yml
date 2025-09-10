@@ -24,44 +24,65 @@ jobs:
           INRIX_APP_ID: ${{ secrets.INRIX_APP_ID }}
           INRIX_HASH_TOKEN: ${{ secrets.INRIX_HASH_TOKEN }}
         run: pytest
-  publish:
+  build:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    outputs:
+      should-publish: ${{ steps.check-version.outputs.should-publish }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Check version and build
+      - name: Install build dependencies
         run: |
           pip install build requests tomli
+      - name: Check version and build
+        id: check-version
+        run: |
           # Get current version from pyproject.toml
           VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
           echo "Current version: $VERSION"
+          
+          # Always build the package
+          python -m build
+          
           # Check if version exists on PyPI
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/ritis_inrix_api/json)
           if [ "$HTTP_STATUS" = "404" ]; then
             echo "Package not found on PyPI - this will be the initial publication"
-            echo "SHOULD_PUBLISH=true" >> $GITHUB_ENV
-            python -m build
+            echo "should-publish=true" >> $GITHUB_OUTPUT
           else
             RESPONSE=$(curl -s https://pypi.org/pypi/ritis_inrix_api/json)
             PYPI_VERSION=$(echo $RESPONSE | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
             echo "PyPI version: $PYPI_VERSION"
             # Only set publish flag if versions are different
             if [ "$VERSION" != "$PYPI_VERSION" ]; then
-            echo "Version changed from $PYPI_VERSION to $VERSION"
-            echo "SHOULD_PUBLISH=true" >> $GITHUB_ENV
-            python -m build
-          else
-            echo "Version unchanged, skipping publish"
-            echo "SHOULD_PUBLISH=false" >> $GITHUB_ENV
+              echo "Version changed from $PYPI_VERSION to $VERSION"
+              echo "should-publish=true" >> $GITHUB_OUTPUT
+            else
+              echo "Version unchanged, skipping publish"
+              echo "should-publish=false" >> $GITHUB_OUTPUT
+            fi
           fi
-          fi
-      - name: Publish to PyPI
-        if: ${{ env.SHOULD_PUBLISH == 'true' }}
-        uses: pypa/gh-action-pypi-publish@v1.8.8
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
         with:
-          password: ${{ secrets.PYPI_TOKEN }}
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.build.outputs.should-publish == 'true'
+    permissions:
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
