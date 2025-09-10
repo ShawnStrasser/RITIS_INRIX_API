@@ -17,6 +17,7 @@ dependencies = [
   "requests",
   "duckdb",
   "pandas",
+  "pyarrow",
 ]
 
 [project.optional-dependencies]
