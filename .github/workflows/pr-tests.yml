@@ -41,13 +41,13 @@ jobs:
           VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
           echo "Current version: $VERSION"
           # Check if version exists on PyPI
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/ritis-inrix-api/json)
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/ritis_inrix_api/json)
           if [ "$HTTP_STATUS" = "404" ]; then
             echo "Package not found on PyPI - this will be the initial publication"
             echo "SHOULD_PUBLISH=true" >> $GITHUB_ENV
             python -m build
           else
-            RESPONSE=$(curl -s https://pypi.org/pypi/ritis-inrix-api/json)
+            RESPONSE=$(curl -s https://pypi.org/pypi/ritis_inrix_api/json)
             PYPI_VERSION=$(echo $RESPONSE | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
             echo "PyPI version: $PYPI_VERSION"
             # Only set publish flag if versions are different
