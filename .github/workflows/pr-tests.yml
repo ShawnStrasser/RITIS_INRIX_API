@@ -1,0 +1,67 @@
+name: Test and Publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          pip install .[dev]
+      - name: Run tests
+        env:
+          RITIS_API_KEY: ${{ secrets.RITIS_API_KEY }}
+          INRIX_APP_ID: ${{ secrets.INRIX_APP_ID }}
+          INRIX_HASH_TOKEN: ${{ secrets.INRIX_HASH_TOKEN }}
+        run: pytest
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      - name: Check version and build
+        run: |
+          pip install build requests tomli
+          # Get current version from pyproject.toml
+          VERSION=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          echo "Current version: $VERSION"
+          # Check if version exists on PyPI
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pypi.org/pypi/ritis-inrix-api/json)
+          if [ "$HTTP_STATUS" = "404" ]; then
+            echo "Package not found on PyPI - this will be the initial publication"
+            echo "SHOULD_PUBLISH=true" >> $GITHUB_ENV
+            python -m build
+          else
+            RESPONSE=$(curl -s https://pypi.org/pypi/ritis-inrix-api/json)
+            PYPI_VERSION=$(echo $RESPONSE | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
+            echo "PyPI version: $PYPI_VERSION"
+            # Only set publish flag if versions are different
+            if [ "$VERSION" != "$PYPI_VERSION" ]; then
+            echo "Version changed from $PYPI_VERSION to $VERSION"
+            echo "SHOULD_PUBLISH=true" >> $GITHUB_ENV
+            python -m build
+          else
+            echo "Version unchanged, skipping publish"
+            echo "SHOULD_PUBLISH=false" >> $GITHUB_ENV
+          fi
+          fi
+      - name: Publish to PyPI
+        if: ${{ env.SHOULD_PUBLISH == 'true' }}
+        uses: pypa/gh-action-pypi-publish@v1.8.8
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}

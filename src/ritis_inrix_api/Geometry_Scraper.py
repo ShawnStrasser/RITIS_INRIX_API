@@ -90,5 +90,7 @@ class GeometryScraper:
 
         print("Combining all batches into a single DataFrame")
         final_df = pd.concat(all_dataframes, ignore_index=True)
+        # drop duplicates
+        final_df.drop_duplicates(subset=['segID'], inplace=True)
         
         return final_df

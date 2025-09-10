@@ -1,57 +1,153 @@
-# RITIS_INRIX_API
+# RITIS INRIX API
 
-A Python toolkit for automated retrieval of traffic data from RITIS and INRIX APIs, supporting both historical and real-time data collection.
+[![PyPI](https://img.shields.io/pypi/v/ritis_inrix_api)](https://pypi.org/project/ritis_inrix_api/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ritis_inrix_api)](https://pypi.org/project/ritis_inrix_api/)
+[![GitHub License](https://img.shields.io/github/license/ShawnStrasser/RITIS_INRIX_API)](https://github.com/ShawnStrasser/RITIS_INRIX_API/blob/main/LICENSE)
 
-## Overview
+[![GitHub issues](https://img.shields.io/github/issues/ShawnStrasser/RITIS_INRIX_API)](https://github.com/ShawnStrasser/RITIS_INRIX_API/issues)
+[![Unit Tests](https://github.com/ShawnStrasser/RITIS_INRIX_API/actions/workflows/pr-tests.yml/badge.svg)](https://github.com/ShawnStrasser/RITIS_INRIX_API/actions/workflows/pr-tests.yml)
 
-This repository provides tools to:
-- Download historical XD segment data from the RITIS API on daily or hourly schedules
-- Fetch real-time speed data from the INRIX API
-- Scrape segment geometries to maintain up-to-date segment lists
+A Python package for automated retrieval of traffic data from RITIS and INRIX APIs for INRIX XD Segments.
 
-## Production Use
+## Installation
 
-This toolkit has been used in production by Oregon DOT since October 2024 to download travel time data from the RITIS API for XD segments at traffic signals on a daily basis.
+```bash
+pip install ritis-inrix-api
+```
 
-## Features
+## Core Functionality
 
-- **RITIS API Integration**: Download historical traffic data with configurable parameters
-  - Supports daily or hourly scheduled downloads
-  - Configurable time bins (5, 10, 15, or 60 minutes)
-  - Customizable data columns and confidence scores
-  - Automatic job submission, monitoring, and data processing
+This package provides tools to:
+*   **Download Historical Data**: Retrieve historical XD segment data from the RITIS API for specific date ranges or on a daily schedule.
+*   **Fetch Real-Time Data**: Get current traffic speeds from the INRIX API.
+*   **Scrape Segment Geometries**: Identify and retrieve XD segment geometries based on a list of latitude/longitude coordinates.
 
-- **INRIX API Integration**: Access real-time traffic data
-  - Token management with automatic refresh
-  - Batch processing for large segment lists
-  - Real-time speed data retrieval
+## Examples
 
-- **Geometry Scraper**: Maintain up-to-date segment lists
-  - Find segments near specified coordinates
-  - Extract detailed segment geometry information
-  - Process locations in batches for efficiency
+Here are some examples of how to use the package.
 
-## Usage
+### RITIS API: Download Historical Data
 
-Please see the [Examples.ipynb](Examples.ipynb) notebook for detailed usage examples, including:
-- Setting up daily data downloads from RITIS
-- Performing one-time historical data downloads
-- Fetching real-time speed data from INRIX
-- Updating segment lists and geometries
+You can download data for a specific date range or set up a recurring daily download.
 
-## Requirements
+#### Download data for a single period
+```python
+import os
+from ritis_inrix_api import RITIS_Downloader
 
-- Python 3.6+
-- Required packages: requests, pandas, duckdb, uuid, zipfile, json
+segments = [1236893704, 1236860943]
 
-## Configuration
+updater = RITIS_Downloader(
+    api_key=os.environ.get('RITIS_API_KEY'),
+    segments=segments, # can be list of IDs or path to a .txt file
+    columns=['speed', 'travel_time_seconds'], # Specify desired columns
+    start_time='06:00:00', #default is '00:00:00
+    end_time='06:15:00', #default is '23:59:00'
+    bin_size=5, #Enter 1, 5, 10, 15(default), or 60
+    units='seconds', #'seconds' or 'minutes'
+    #download_path='Data', #where to save data
 
-Both APIs require authentication:
-- RITIS API requires an API key
-- INRIX API requires an app ID and hash token
+) 
 
-Store these credentials securely and reference them in your code.
+# Returns a pandas DataFrame (unless download_path is specified)
+df = updater.single_download('2025-09-01', '2025-09-02', 'test')
+```
+<details>
+<summary>Sample Output</summary>
 
-## Data Storage
+|    | xd_id      | measurement_tstamp  |   speed |   travel_time_seconds |
+|---:|:-----------|:--------------------|--------:|----------------------:|
+|  0 | 1236860943 | 2025-09-01 06:00:00 |      25 |                 11.95 |
+|  1 | 1236860943 | 2025-09-01 06:05:00 |      25 |                 11.95 |
+|  2 | 1236860943 | 2025-09-01 06:10:00 |      25 |                 11.95 |
 
-Data is stored in Parquet format for efficient storage and fast query performance.
+</details>
+
+#### Set up automated daily downloads
+This will download data from the last run date through yesterday one day at a time and save it as Parquet files at the specified download path. This option is intended to run daily via a scheduler like cron or Windows Task Scheduler.
+```python
+import os
+from ritis_inrix_api import RITIS_Downloader
+
+updater = RITIS_Downloader(
+    api_key=os.environ.get('RITIS_API_KEY'),
+    download_path='Data', # Data will be saved in this directory
+    segments='sample_XD_segments.txt', # Path to a file with segment IDs
+    last_run_path='last_run.txt' # Path for text file containing last run datetime
+) 
+
+updater.daily_download()
+```
+
+### INRIX API: Fetch Real-Time Speeds
+```python
+import os
+from ritis_inrix_api import INRIX_Downloader
+
+inrix_downloader = INRIX_Downloader(
+    app_id=os.environ.get('INRIX_APP_ID'),
+    hash_token=os.environ.get('INRIX_HASH_TOKEN'),
+    segments_path='sample_XD_segments.txt'
+)
+
+# Returns a pandas DataFrame
+speed_data = inrix_downloader.get_speed_data()
+```
+<details>
+<summary>Sample Output</summary>
+
+|    | code       | type   |   speed |   average |
+|---:|:-----------|:-------|--------:|----------:|
+|  0 | 1236893704 | XDS    |      53 |        52 |
+|  1 | 1236860943 | XDS    |      21 |        19 |
+
+</details>
+
+### Geometry Scraper: Find Segments and Geometries
+This tool finds XD segment geometries within a specified radius of given latitude/longitude points.
+
+#### How to get the authentication cookie
+The Geometry Scraper requires a valid browser cookie from a logged-in RITIS session to authenticate its requests. Open network tab in dev tools look for a request that has a cookie, copy and paste the cookie when prompted in the console.
+
+#### Example Usage
+```python
+from ritis_inrix_api import GeometryScraper
+
+# A list of (latitude, longitude) tuples
+locations = [
+    (42.34072155027376, -122.89930147132378),
+    (44.3029045246138, -120.842181329508),
+    # ... more locations
+]
+
+# The scraper will prompt you to paste the cookie into the console
+scraper = GeometryScraper()
+geometry_data = scraper.process_locations(locations, buffer_size=50) # buffer size in yards
+
+# Save the new segment IDs to a file
+segments = list(geometry_data['segID'])
+with open('Map_Data/XD_Segments.txt', 'w') as f:
+    f.write(','.join(map(str, segments)))
+```
+<details>
+<summary>Sample Output</summary>
+
+The script will print progress messages as it runs:
+```
+Processing 1002 locations in batches of 500
+Processing batch 1
+Processing batch 2
+Processing batch 3
+Combining all batches into a single DataFrame
+There were 5008 segments found for the provided signals.
+```
+
+The final `geometry_data` DataFrame will look like this:
+
+|    | zip   | country | segID      | bearing | county    | ... | coordinates                                          |
+|---:|:------|:--------|:-----------|:--------|:----------|:----|:-----------------------------------------------------|
+|  0 | 97051 | USA     | 1237027426 | E       | COLUMBIA  | ... | [[-122.8316, 45.84865], [-122.83134, 45.84852], ...] |
+|  1 | 97756 | USA     | 1237004066 | S       | DESCHUTES | ... | [[-121.19391, 44.24292], [-121.1941, 44.2427], ...]   |
+|  2 | 97527 | USA     | 125164532  | E       | JOSEPHINE | ... | [[-123.32078, 42.42779], [-123.32054, 42.42772], ...] |
+</details>
+
