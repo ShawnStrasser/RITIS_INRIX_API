@@ -2,6 +2,10 @@ API_keys/
 Map_Data/
 __pycache__/
 ODOT*
-test*
 working_on*
 process_single_date.py
+
+# Python build artifacts
+*.egg-info/
+build/
+dist/
