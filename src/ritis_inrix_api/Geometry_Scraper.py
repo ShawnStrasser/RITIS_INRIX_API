@@ -7,10 +7,18 @@ import warnings
 import getpass
 
 class GeometryScraper:
-    def __init__(self, cookie: str = None):
+    def __init__(self, cookie: str = None, atlas_version_id: int = 16):
+        """
+        Args:
+            cookie: Cookie from a logged-in RITIS browser session. Prompted for if not given.
+            atlas_version_id: RITIS map (atlas) version for XD geometry. When INRIX/RITIS release a new XD map,
+                read the current value from the 'atlas_version_id' field of an xd_coordinates request in the
+                browser dev tools network tab and pass it here.
+        """
         if cookie is None:
             cookie = getpass.getpass(prompt='Enter your cookie: ')
         self.cookie = cookie
+        self.atlas_version_id = atlas_version_id
         self.headers = {'Cookie': cookie}
         warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
@@ -48,7 +56,7 @@ class GeometryScraper:
         url = 'https://pda.ritis.org/api/xd_coordinates/'
         payload = {
             "datasource_id": "inrix_xd",
-            "atlas_version_id": 13,
+            "atlas_version_id": self.atlas_version_id,
             "geo_limit": 7000,
             "include_full_tmc_network": True,
             "country_code": None,

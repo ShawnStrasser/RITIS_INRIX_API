@@ -496,7 +496,7 @@ class RITIS_Downloader:
                             self._print(f"Job {job_id} failed with state: {status}, retrying now", 1, new_line_first=True)
                             job_id, job_uuid = self._submit_job(start_date, end_date, job_name)
                         else:
-                            raise Exception(f"Job {job_id} failed with state: {status['state']}")
+                            raise Exception(f"Job {job_id} failed with state: {status}")
                     elif status == 'RATE_LIMITED':
                         self._print(f"Rate limit exceeded, mandatory nap time for 5 minutes...", 1, new_line_first=True)
                         time.sleep(300)
